@@ -60,8 +60,15 @@ const LayersPanel = () => {
 
   const duplicateLayer = (layer, e) => {
     e.stopPropagation();
-    layer.object.clone().then(clone => {
-      clone.set({ left: layer.object.left + 20, top: layer.object.top + 20, id: `layer-${Date.now()}`, name: `${layer.name} copy` });
+    layer.object.clone(["id", "name", "effectsData"]).then((clone) => {
+      clone.set({
+        left: layer.object.left + 20,
+        top: layer.object.top + 20,
+        id: `layer-${Date.now()}`,
+        name: `${layer.name} copy`,
+      });
+      // Preserve custom adjustment state
+      if (layer.object.effectsData) clone.effectsData = layer.object.effectsData;
       fabricRef.current?.add(clone);
       fabricRef.current?.setActiveObject(clone);
       fabricRef.current?.requestRenderAll();
@@ -90,18 +97,23 @@ const LayersPanel = () => {
   const onDrop = (e, targetLayer, targetUiIndex) => {
     e.preventDefault();
     setDragOverLayerId(null);
-    if (!draggedLayerId || draggedLayerId === targetLayer.id || !fabricRef.current) return;
+    if (
+      !draggedLayerId ||
+      draggedLayerId === targetLayer.id ||
+      !fabricRef.current
+    )
+      return;
 
     const canvas = fabricRef.current;
-    const sourceLayer = layers.find(l => l.id === draggedLayerId);
+    const sourceLayer = layers.find((l) => l.id === draggedLayerId);
     if (!sourceLayer) return;
 
     // fabric index is reversed from UI index
     const newFabricIndex = layers.length - 1 - targetUiIndex;
-    
+
     // Move the object in the canvas stack
     canvas.moveObjectTo(sourceLayer.object, newFabricIndex);
-    
+
     canvas.requestRenderAll();
     canvas.fire("layer:updated");
     saveHistory();
@@ -124,14 +136,16 @@ const LayersPanel = () => {
           const isActive = layer.object === selectedObject;
           const isDragging = layer.id === draggedLayerId;
           const isDragOver = layer.id === dragOverLayerId;
-          
+
           return (
-            <div 
-              key={layer.id} 
+            <div
+              key={layer.id}
               className={`layer-item ${isActive ? "layer-item--active" : ""} ${!layer.visible ? "layer-item--hidden" : ""}`}
               style={{
                 opacity: isDragging ? 0.5 : 1,
-                borderTop: isDragOver ? "2px solid #7c5cfc" : "1px solid transparent",
+                borderTop: isDragOver
+                  ? "2px solid #7c5cfc"
+                  : "1px solid transparent",
               }}
               draggable={draggableLayerId === layer.id}
               onDragStart={(e) => onDragStart(e, layer)}
@@ -141,7 +155,7 @@ const LayersPanel = () => {
               onClick={() => selectLayer(layer.object)}
             >
               {/* Drag handle */}
-              <span 
+              <span
                 className="layer-drag"
                 onMouseEnter={() => setDraggableLayerId(layer.id)}
                 onMouseLeave={() => setDraggableLayerId(null)}
@@ -157,39 +171,85 @@ const LayersPanel = () => {
 
               {/* Controls */}
               <div className="layer-controls">
-                <button className="layer-ctrl-btn" title={layer.visible ? "Hide" : "Show"} onClick={(e) => toggleVisibility(layer, e)}>
+                <button
+                  className="layer-ctrl-btn"
+                  title={layer.visible ? "Hide" : "Show"}
+                  onClick={(e) => toggleVisibility(layer, e)}
+                >
                   {layer.visible ? "👁" : "🙈"}
                 </button>
-                <button className="layer-ctrl-btn" title={layer.locked ? "Unlock" : "Lock"} onClick={(e) => toggleLock(layer, e)}>
+                <button
+                  className="layer-ctrl-btn"
+                  title={layer.locked ? "Unlock" : "Lock"}
+                  onClick={(e) => toggleLock(layer, e)}
+                >
                   {layer.locked ? "🔒" : "🔓"}
                 </button>
-                <button className="layer-ctrl-btn" title="Duplicate" onClick={(e) => duplicateLayer(layer, e)}>⧉</button>
-                <button className="layer-ctrl-btn layer-ctrl-btn--del" title="Delete" onClick={(e) => deleteLayer(layer, e)}>✕</button>
+                <button
+                  className="layer-ctrl-btn"
+                  title="Duplicate"
+                  onClick={(e) => duplicateLayer(layer, e)}
+                >
+                  ⧉
+                </button>
+                <button
+                  className="layer-ctrl-btn layer-ctrl-btn--del"
+                  title="Delete"
+                  onClick={(e) => deleteLayer(layer, e)}
+                >
+                  ✕
+                </button>
               </div>
 
               {/* Expanded controls when active */}
               {isActive && (
-                <div className="layer-expanded" onClick={e => e.stopPropagation()}>
+                <div
+                  className="layer-expanded"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <div className="adj-row">
                     <div className="adj-label-row">
                       <span className="adj-label">Opacity</span>
-                      <span className="adj-value">{Math.round(layer.opacity * 100)}%</span>
+                      <span className="adj-value">
+                        {Math.round(layer.opacity * 100)}%
+                      </span>
                     </div>
-                    <input type="range" className="adj-slider" min="0" max="1" step="0.01"
+                    <input
+                      type="range"
+                      className="adj-slider"
+                      min="0"
+                      max="1"
+                      step="0.01"
                       draggable={false}
-                      onDragStart={e => { e.preventDefault(); e.stopPropagation(); }}
-                      onPointerDown={e => e.stopPropagation()}
-                      onMouseDown={e => e.stopPropagation()}
+                      onDragStart={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
                       value={layer.opacity}
-                      onChange={e => changeOpacity(layer, parseFloat(e.target.value))} />
+                      onChange={(e) =>
+                        changeOpacity(layer, parseFloat(e.target.value))
+                      }
+                    />
                   </div>
-                  <select className="panel-select" value={layer.blendMode}
+                  <select
+                    className="panel-select"
+                    value={layer.blendMode}
                     draggable={false}
-                    onDragStart={e => { e.preventDefault(); e.stopPropagation(); }}
-                    onPointerDown={e => e.stopPropagation()}
-                    onMouseDown={e => e.stopPropagation()}
-                    onChange={e => changeBlendMode(layer, e.target.value)}>
-                    {BLEND_MODES.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
+                    onDragStart={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onChange={(e) => changeBlendMode(layer, e.target.value)}
+                  >
+                    {BLEND_MODES.map((b) => (
+                      <option key={b.value} value={b.value}>
+                        {b.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
               )}

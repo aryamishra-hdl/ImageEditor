@@ -1,24 +1,40 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { useEditorContext } from "../../context/EditorContextInstance";
 
-const CanvasFrame = ({ canvasRef, onUpload }) => {
+const CanvasFrame = ({ canvasRef, onMultiUpload, onReplaceUpload, onExportClick, onResizeClick }) => {
   const wrapperRef = useRef(null);
-  const { fabricRef, undo, redo, exportCanvas, activeTool } = useEditorContext();
+  const uploadInputRef = useRef(null);
+  const replaceInputRef = useRef(null);
+  const [showUploadMenu, setShowUploadMenu] = useState(false);
+  const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
 
-  // Responsive canvas sizing
+  const { fabricRef, undo, redo, activeTool, isCropping, applyCrop, cancelCrop, selectedObject } = useEditorContext();
+
+  const hasImage = selectedObject?.type === "image";
+
+  // Track canvas dimensions for status bar — re-reads after resize
   useEffect(() => {
-    if (!wrapperRef.current || !fabricRef.current) return;
-    const observer = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        const { width } = entry.contentRect;
-        // Don't resize canvas below a minimum
-        if (width < 400) return;
-        // Keep canvas displayed responsively via CSS transform — no need to resize Fabric canvas
-      }
-    });
-    observer.observe(wrapperRef.current);
-    return () => observer.disconnect();
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const update = () => setCanvasSize({ w: canvas.width, h: canvas.height });
+    update();
+    // Fabric fires no built-in resize event; poll via a custom event we'll fire from resizeCanvas
+    canvas.on("canvas:resized", update);
+    return () => canvas.off("canvas:resized", update);
   }, [fabricRef]);
+
+  // Close upload menu on outside click
+  useEffect(() => {
+    if (!showUploadMenu) return;
+    const close = () => setShowUploadMenu(false);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [showUploadMenu]);
+
+  const handleUploadMenuClick = (e) => {
+    e.stopPropagation();
+    setShowUploadMenu(v => !v);
+  };
 
   return (
     <div className="canvas-panel">
@@ -41,15 +57,70 @@ const CanvasFrame = ({ canvasRef, onUpload }) => {
             </svg>
           </button>
           <div className="topbar-separator" />
-          <label className="topbar-btn topbar-btn--upload" htmlFor="canvas-upload" title="Upload image">
+
+          {/* Upload dropdown */}
+          <div className="upload-dropdown-wrapper">
+            <button
+              className="topbar-btn topbar-btn--upload"
+              onClick={handleUploadMenuClick}
+              title="Upload options"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              Upload ▾
+            </button>
+            {showUploadMenu && (
+              <div className="upload-dropdown-menu" onClick={e => e.stopPropagation()}>
+                <button
+                  className="upload-menu-item"
+                  onClick={() => { setShowUploadMenu(false); uploadInputRef.current?.click(); }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                  </svg>
+                  Upload Image(s)
+                </button>
+                <button
+                  className={`upload-menu-item ${!hasImage ? "upload-menu-item--disabled" : ""}`}
+                  disabled={!hasImage}
+                  onClick={() => { if (hasImage) { setShowUploadMenu(false); replaceInputRef.current?.click(); } }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/><line x1="12" y1="3" x2="12" y2="15"/>
+                  </svg>
+                  Replace Selected
+                </button>
+              </div>
+            )}
+            {/* Hidden inputs */}
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={onMultiUpload}
+              hidden
+            />
+            <input
+              ref={replaceInputRef}
+              type="file"
+              accept="image/*"
+              onChange={onReplaceUpload}
+              hidden
+            />
+          </div>
+
+          <button className="topbar-btn topbar-btn--export" onClick={onResizeClick} title="Resize Canvas">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
             </svg>
-            Upload
-          </label>
-          <input id="canvas-upload" type="file" accept="image/*" onChange={onUpload} hidden />
-          <button className="topbar-btn topbar-btn--export" onClick={() => exportCanvas("png")} title="Export PNG">
+            Resize
+          </button>
+          <button className="topbar-btn topbar-btn--export" onClick={onExportClick} title="Export Image">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
               <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
@@ -61,14 +132,54 @@ const CanvasFrame = ({ canvasRef, onUpload }) => {
 
       {/* Canvas workspace */}
       <div className="canvas-workspace" ref={wrapperRef}>
-        <div className="canvas-checker">
-          <canvas ref={canvasRef} />
+        <div className="canvas-centerer">
+          <div className="canvas-centerer-inner">
+            <div className="canvas-checker">
+              <canvas ref={canvasRef} />
+            </div>
+          </div>
         </div>
+
+        {/* Crop / Lasso confirmation bar — clearly visible overlay at bottom of canvas */}
+        {isCropping && (
+          <div className="crop-confirm-bar">
+            <span className="crop-confirm-label">
+              {activeTool === "lasso" ? "Draw selection on canvas, then release" : "Drag the region, then confirm"}
+            </span>
+            {activeTool !== "lasso" && (
+              <>
+                <button className="crop-confirm-btn crop-confirm-btn--apply" onClick={applyCrop}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                  Apply Crop
+                </button>
+                <button className="crop-confirm-btn crop-confirm-btn--cancel" onClick={cancelCrop}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                  Cancel
+                </button>
+              </>
+            )}
+            {activeTool === "lasso" && (
+              <button className="crop-confirm-btn crop-confirm-btn--cancel" onClick={() => {
+                if (fabricRef.current) {
+                  fabricRef.current.isDrawingMode = false;
+                  fabricRef.current.selection = true;
+                }
+                cancelCrop();
+              }}>
+                Cancel Lasso
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Status bar */}
       <div className="canvas-statusbar">
-        <span>920 × 580 px</span>
+        <span>{canvasSize.w > 0 ? `${canvasSize.w} × ${canvasSize.h} px` : "Loading..."}</span>
         <span>·</span>
         <span>Canvas</span>
       </div>

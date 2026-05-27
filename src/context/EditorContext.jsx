@@ -15,6 +15,8 @@ export const EditorProvider = ({ children }) => {
     size: 20,
     color: "#ff6b6b",
     opacity: 1,
+    hardness: 100,
+    tipShape: "round",
   });
 
   // Use a ref to keep the sync logic fresh while keeping the callback identity perfectly stable
@@ -26,7 +28,7 @@ export const EditorProvider = ({ children }) => {
       if (!canvas) return;
       const objs = canvas.getObjects();
       setLayers(
-        [...objs].reverse().map((obj, i) => {
+        [...objs].reverse().filter(obj => !obj.excludeFromLayers).map((obj, i) => {
           if (!obj.id) obj.id = `layer-${Date.now()}-${i}`;
           return {
             id: obj.id,

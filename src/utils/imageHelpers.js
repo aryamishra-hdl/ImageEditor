@@ -26,6 +26,10 @@ export const DEFAULT_OBJECT_STATE = {
   opacity: 1,
   fontFamily: "Inter",
   flipX: false, flipY: false,
+  charSpacing: 0,
+  lineHeight: 1.16,
+  textAlign: "left",
+  direction: "ltr",
 };
 
 export const DEFAULT_EFFECTS = {
@@ -41,6 +45,16 @@ export const DEFAULT_EFFECTS = {
   vibrance: 0,
   blur: 0,
   noise: 0,
+  sharpen: 0,
+  temperature: 0,
+  levelsBlack: 0,
+  levelsMid: 1.0,
+  levelsWhite: 255,
+  curveMidpoint: 0, // Gamma applied via Tone Curve component
+  curvePts: null,
+  redMultiplier: 1,
+  greenMultiplier: 1,
+  blueMultiplier: 1,
   preset: "none",
 };
 

@@ -1,10 +1,12 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { useEditorContext } from "../context/EditorContextInstance";
 import CanvasFrame from "./Editor/CanvasFrame";
 import Toolbar from "./Editor/Toolbar";
 import PropertiesPanel from "./Editor/Panels/PropertiesPanel";
 import LayersPanel from "./Editor/Panels/LayersPanel";
 import AdjustmentsPanel from "./Editor/Panels/AdjustmentsPanel";
+import ExportModal from "./Editor/Modals/ExportModal";
+import ResizeModal from "./Editor/Modals/ResizeModal";
 
 const TABS = [
   { id: "properties", label: "Properties", icon: "⬡" },
@@ -14,7 +16,6 @@ const TABS = [
 
 function ImageEditor() {
   const canvasRef = useRef(null);
-  const fileInputRef = useRef(null);
 
   const {
     initCanvas, disposeCanvas,
@@ -24,7 +25,12 @@ function ImageEditor() {
     addText, addShape,
     brushSettings, setBrushSettings,
     setBrushMode, setEraserMode,
+    exportCanvas, resizeCanvas,
+    fabricRef,
   } = useEditorContext();
+
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [showResizeModal, setShowResizeModal] = useState(false);
 
   // Initialize canvas
   useEffect(() => {
@@ -32,12 +38,40 @@ function ImageEditor() {
     return () => { disposeCanvas(); };
   }, [initCanvas, disposeCanvas]);
 
-  const handleUpload = (e) => {
+  // Convert a File to a base64 data URL — permanent, never expires,
+  // and survives history serialization (blob: URLs die after revokeObjectURL)
+  const fileToDataUrl = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = () => reject(new Error("FileReader failed"));
+      reader.readAsDataURL(file);
+    });
+
+  const handleMultiUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    for (const file of files) {
+      try {
+        const dataUrl = await fileToDataUrl(file);
+        addImage(dataUrl);
+      } catch (err) {
+        console.error("Failed to read file:", err);
+      }
+    }
+    e.target.value = "";
+  };
+
+  const replaceFileInputRef = useRef(null);
+
+  const handleReplace = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    if (selectedObject?.type === "image") replaceImage(url);
-    else addImage(url);
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      replaceImage(dataUrl);
+    } catch (err) {
+      console.error("Failed to read file:", err);
+    }
     e.target.value = "";
   };
 
@@ -62,7 +96,13 @@ function ImageEditor() {
 
       {/* Center: Canvas */}
       <div className="pro-editor__center">
-        <CanvasFrame canvasRef={canvasRef} onUpload={handleUpload} />
+        <CanvasFrame 
+          canvasRef={canvasRef} 
+          onMultiUpload={handleMultiUpload}
+          onReplaceUpload={handleReplace}
+          onExportClick={() => setShowExportModal(true)}
+          onResizeClick={() => setShowResizeModal(true)}
+        />
 
         {/* Brush Settings bar (floating below canvas when brush active) */}
         {showBrushSettings && (
@@ -80,6 +120,20 @@ function ImageEditor() {
                   <input type="range" min="0" max="1" step="0.05" value={brushSettings.opacity}
                     onChange={e => updateBrush("opacity", Number(e.target.value))} />
                   <span>{Math.round(brushSettings.opacity * 100)}%</span>
+                </div>
+                <div className="brush-setting">
+                  <label>Hardness</label>
+                  <input type="range" min="0" max="100" value={brushSettings.hardness || 100}
+                    onChange={e => updateBrush("hardness", Number(e.target.value))} />
+                  <span>{brushSettings.hardness || 100}%</span>
+                </div>
+                <div className="brush-setting">
+                  <label>Shape</label>
+                  <select className="panel-select" style={{ width: 80 }} value={brushSettings.tipShape || "round"}
+                    onChange={e => updateBrush("tipShape", e.target.value)}>
+                    <option value="round">Round</option>
+                    <option value="square">Square</option>
+                  </select>
                 </div>
                 <div className="brush-setting">
                   <label>Color</label>
@@ -110,14 +164,35 @@ function ImageEditor() {
 
         {/* Tab content */}
         <div className="panel-content">
-          {activePanel === "properties"  && <PropertiesPanel onReplace={() => fileInputRef.current?.click()} />}
+          {activePanel === "properties"  && <PropertiesPanel onReplace={() => replaceFileInputRef.current?.click()} />}
           {activePanel === "layers"      && <LayersPanel />}
           {activePanel === "adjustments" && <AdjustmentsPanel />}
         </div>
       </div>
 
-      {/* Hidden replace input */}
-      <input ref={fileInputRef} type="file" accept="image/*" onChange={handleUpload} hidden />
+      {showExportModal && (
+        <ExportModal 
+          onClose={() => setShowExportModal(false)} 
+          onExport={exportCanvas} 
+        />
+      )}
+
+      {showResizeModal && (
+        <ResizeModal 
+          fabricRef={fabricRef}
+          onClose={() => setShowResizeModal(false)} 
+          onResize={resizeCanvas} 
+        />
+      )}
+
+      {/* Hidden replace-image input triggered from PropertiesPanel */}
+      <input
+        ref={replaceFileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleReplace}
+        hidden
+      />
     </div>
   );
 }
