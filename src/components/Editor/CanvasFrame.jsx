@@ -1,29 +1,40 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback, useSyncExternalStore } from "react";
 import { useEditorContext } from "../../context/EditorContextInstance";
+import { 
+  LuUndo2, 
+  LuRedo2, 
+  LuUpload, 
+  LuScaling, 
+  LuDownload, 
+  LuRefreshCw, 
+  LuCheck, 
+  LuX 
+} from "react-icons/lu";
 
 const CanvasFrame = ({ canvasRef, onMultiUpload, onReplaceUpload, onExportClick, onResizeClick }) => {
   const wrapperRef = useRef(null);
   const uploadInputRef = useRef(null);
   const replaceInputRef = useRef(null);
   const [showUploadMenu, setShowUploadMenu] = useState(false);
-  const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
 
   const { fabricRef, undo, redo, activeTool, isCropping, applyCrop, cancelCrop, selectedObject } = useEditorContext();
 
   const hasImage = selectedObject?.type === "image";
 
-  // Track canvas dimensions for status bar — re-reads after resize
-  useEffect(() => {
-    const canvas = fabricRef.current;
-    if (!canvas) return;
-    const update = () => setCanvasSize({ w: canvas.width, h: canvas.height });
-    update();
-    // Fabric fires no built-in resize event; poll via a custom event we'll fire from resizeCanvas
-    canvas.on("canvas:resized", update);
-    return () => canvas.off("canvas:resized", update);
-  }, [fabricRef]);
+  // ── Subscribe to external Fabric canvas state (handles StrictMode double-mount safely) ──
+  const canvasW = useSyncExternalStore(
+    useCallback((cb) => { const c = fabricRef.current; if (!c) return () => {}; c.on("canvas:resized", cb); return () => c.off("canvas:resized", cb); }, [fabricRef]),
+    useCallback(() => fabricRef.current?.width ?? 0, [fabricRef]),
+  );
+  const canvasH = useSyncExternalStore(
+    useCallback((cb) => { const c = fabricRef.current; if (!c) return () => {}; c.on("canvas:resized", cb); return () => c.off("canvas:resized", cb); }, [fabricRef]),
+    useCallback(() => fabricRef.current?.height ?? 0, [fabricRef]),
+  );
+  const hasLayers = useSyncExternalStore(
+    useCallback((cb) => { const c = fabricRef.current; if (!c) return () => {}; c.on("object:added", cb); c.on("object:removed", cb); return () => { c.off("object:added", cb); c.off("object:removed", cb); }; }, [fabricRef]),
+    useCallback(() => { const c = fabricRef.current; return c ? c.getObjects().length > 0 : false; }, [fabricRef]),
+  );
 
-  // Close upload menu on outside click
   useEffect(() => {
     if (!showUploadMenu) return;
     const close = () => setShowUploadMenu(false);
@@ -37,61 +48,64 @@ const CanvasFrame = ({ canvasRef, onMultiUpload, onReplaceUpload, onExportClick,
   };
 
   return (
-    <div className="canvas-panel">
-      {/* Top bar */}
-      <div className="canvas-topbar">
-        <div className="canvas-topbar-left">
-          <span className="canvas-title">ProEdit Canvas</span>
-          <span className={`tool-badge tool-badge--${activeTool}`}>{activeTool}</span>
+    <div className="flex-1 flex flex-col overflow-hidden bg-[#f9fafb]">
+      {/* Top bar - high visual quality, matching the layout in the screenshots */}
+      <div className="flex items-center justify-between px-6 h-14 bg-white border-b border-[#e5e7eb] shrink-0">
+        <div className="flex items-center gap-3">
+          <span className="font-semibold text-sm text-[#111827]">ProEdit Canvas</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#f3f4f6] text-[#4b5563] border border-[#e5e7eb]">
+            {activeTool || "select"}
+          </span>
         </div>
 
-        <div className="canvas-topbar-right">
-          <button className="topbar-btn" onClick={undo} title="Undo (Ctrl+Z)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-              <path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
-            </svg>
+        {/* Center/Right controls */}
+        <div className="flex items-center gap-2">
+          {/* Undo Button */}
+          <button 
+            className="flex items-center justify-center w-8 h-8 rounded-lg text-[#4b5563] hover:bg-[#f3f4f6] hover:text-[#111827] transition-all" 
+            onClick={undo} 
+            title="Undo (Ctrl+Z)"
+          >
+            <LuUndo2 className="w-4.5 h-4.5" />
           </button>
-          <button className="topbar-btn" onClick={redo} title="Redo (Ctrl+Y)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-              <path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/>
-            </svg>
+          
+          {/* Redo Button */}
+          <button 
+            className="flex items-center justify-center w-8 h-8 rounded-lg text-[#4b5563] hover:bg-[#f3f4f6] hover:text-[#111827] transition-all" 
+            onClick={redo} 
+            title="Redo (Ctrl+Y)"
+          >
+            <LuRedo2 className="w-4.5 h-4.5" />
           </button>
-          <div className="topbar-separator" />
+          
+          <div className="w-px h-5 bg-[#e5e7eb] mx-1" />
 
           {/* Upload dropdown */}
-          <div className="upload-dropdown-wrapper">
+          <div className="relative">
             <button
-              className="topbar-btn topbar-btn--upload"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[#4b5563] hover:bg-[#f3f4f6] hover:text-[#111827] text-xs font-semibold transition-all border border-[#e5e7eb] bg-white shadow-sm"
               onClick={handleUploadMenuClick}
               title="Upload options"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-              </svg>
-              Upload ▾
+              <LuUpload className="w-4 h-4 text-[#4b5563]" />
+              <span>Upload</span>
+              <span className="text-[10px] text-[#9ca3af]">▼</span>
             </button>
             {showUploadMenu && (
-              <div className="upload-dropdown-menu" onClick={e => e.stopPropagation()}>
+              <div className="absolute top-[calc(100%+6px)] right-0 bg-white border border-[#e5e7eb] rounded-lg shadow-lg min-w-[170px] z-[200] overflow-hidden py-1 animate-fadeIn" onClick={e => e.stopPropagation()}>
                 <button
-                  className="upload-menu-item"
+                  className="flex items-center gap-2 w-full px-4 py-2 text-xs text-[#374151] hover:bg-[#f3f4f6] transition-all text-left font-medium"
                   onClick={() => { setShowUploadMenu(false); uploadInputRef.current?.click(); }}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-                  </svg>
+                  <LuUpload className="w-4 h-4" />
                   Upload Image(s)
                 </button>
                 <button
-                  className={`upload-menu-item ${!hasImage ? "upload-menu-item--disabled" : ""}`}
+                  className={`flex items-center gap-2 w-full px-4 py-2 text-xs text-[#374151] hover:bg-[#f3f4f6] transition-all text-left font-medium ${!hasImage ? "opacity-40 cursor-not-allowed" : ""}`}
                   disabled={!hasImage}
                   onClick={() => { if (hasImage) { setShowUploadMenu(false); replaceInputRef.current?.click(); } }}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="7 10 12 15 17 10"/><line x1="12" y1="3" x2="12" y2="15"/>
-                  </svg>
+                  <LuRefreshCw className="w-4 h-4" />
                   Replace Selected
                 </button>
               </div>
@@ -114,56 +128,61 @@ const CanvasFrame = ({ canvasRef, onMultiUpload, onReplaceUpload, onExportClick,
             />
           </div>
 
-          <button className="topbar-btn topbar-btn--export" onClick={onResizeClick} title="Resize Canvas">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-            </svg>
-            Resize
+          {/* Resize button */}
+          <button 
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all bg-[#0070f3] text-white hover:bg-[#0060d3] shadow-sm shadow-blue-500/10" 
+            onClick={onResizeClick} 
+            title="Resize Canvas"
+          >
+            <LuScaling className="w-4 h-4" />
+            <span>Resize</span>
           </button>
-          <button className="topbar-btn topbar-btn--export" onClick={onExportClick} title="Export Image">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-            Export
+
+          {/* Export button */}
+          <button 
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              hasLayers
+                ? "bg-[#0070f3] text-white hover:bg-[#0060d3] shadow-sm shadow-blue-500/10 cursor-pointer"
+                : "bg-[#e5e7eb] text-[#9ca3af] cursor-not-allowed"
+            }`}
+            onClick={hasLayers ? onExportClick : undefined} 
+            title={hasLayers ? "Export Image" : "No layers to export"}
+          >
+            <LuDownload className="w-4 h-4" />
+            <span>Export</span>
           </button>
         </div>
       </div>
 
-      {/* Canvas workspace */}
-      <div className="canvas-workspace" ref={wrapperRef}>
-        <div className="canvas-centerer">
-          <div className="canvas-centerer-inner">
-            <div className="canvas-checker">
-              <canvas ref={canvasRef} />
-            </div>
-          </div>
+      {/* Canvas workspace - checker background */}
+      <div 
+        className="flex-1 overflow-auto canvas-workspace relative p-6 flex justify-start items-start" 
+        ref={wrapperRef}
+      >
+        <div className="rounded-xl overflow-hidden shadow-2xl border border-[#e5e7eb] canvas-checker shrink-0" style={{ margin: '0 auto', display: 'inline-block' }}>
+          <canvas ref={canvasRef} className="block" />
         </div>
 
-        {/* Crop / Lasso confirmation bar — clearly visible overlay at bottom of canvas */}
+        {/* Crop overlay bottom bar */}
         {isCropping && (
-          <div className="crop-confirm-bar">
-            <span className="crop-confirm-label">
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 px-5 py-3 bg-white/90 backdrop-blur border border-[#e5e7eb] rounded-xl shadow-xl z-50">
+            <span className="text-xs text-[#4b5563] font-medium">
               {activeTool === "lasso" ? "Draw selection on canvas, then release" : "Drag the region, then confirm"}
             </span>
             {activeTool !== "lasso" && (
-              <>
-                <button className="crop-confirm-btn crop-confirm-btn--apply" onClick={applyCrop}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <polyline points="20 6 9 17 4 12"/>
-                  </svg>
-                  Apply Crop
+              <div className="flex gap-2">
+                <button className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-[#22c55e] hover:bg-[#16a34a] shadow-sm transition-all" onClick={applyCrop}>
+                  <LuCheck className="w-4.5 h-4.5" />
+                  <span>Apply</span>
                 </button>
-                <button className="crop-confirm-btn crop-confirm-btn--cancel" onClick={cancelCrop}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                  Cancel
+                <button className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-[#ef4444] hover:bg-[#dc2626] shadow-sm transition-all" onClick={cancelCrop}>
+                  <LuX className="w-4.5 h-4.5" />
+                  <span>Cancel</span>
                 </button>
-              </>
+              </div>
             )}
             {activeTool === "lasso" && (
-              <button className="crop-confirm-btn crop-confirm-btn--cancel" onClick={() => {
+              <button className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-[#ef4444] hover:bg-[#dc2626] shadow-sm transition-all" onClick={() => {
                 if (fabricRef.current) {
                   fabricRef.current.isDrawingMode = false;
                   fabricRef.current.selection = true;
@@ -178,8 +197,8 @@ const CanvasFrame = ({ canvasRef, onMultiUpload, onReplaceUpload, onExportClick,
       </div>
 
       {/* Status bar */}
-      <div className="canvas-statusbar">
-        <span>{canvasSize.w > 0 ? `${canvasSize.w} × ${canvasSize.h} px` : "Loading..."}</span>
+      <div className="flex items-center gap-2 px-6 h-8 bg-white border-t border-[#e5e7eb] text-xs text-[#6b7280] font-medium shrink-0">
+        <span>{canvasW > 0 ? `${canvasW} × ${canvasH} px` : ""}</span>
         <span>·</span>
         <span>Canvas</span>
       </div>

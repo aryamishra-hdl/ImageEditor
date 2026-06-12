@@ -74,12 +74,13 @@ export const EditorProvider = ({ children }) => {
   );
 
   // We wrap initCanvas to additionally bind our layer-sync events
+  const { initCanvas: fabricInitCanvas } = editor;
   const initCanvas = useCallback(
     (el) => {
-      const canvas = editor.initCanvas(el);
+      const canvas = fabricInitCanvas(el);
       if (canvas) bindCanvasEvents(canvas);
     },
-    [editor.initCanvas, bindCanvasEvents],
+    [fabricInitCanvas, bindCanvasEvents],
   );
 
   // If the canvas is already initialized before we bind, sync once on mount

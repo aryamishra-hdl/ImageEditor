@@ -1,0 +1,117 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-base text-primary overflow-hidden h-full;
+  }
+  html, #root {
+    @apply h-full;
+  }
+  button {
+    font: inherit;
+  }
+  input, select {
+    font: inherit;
+  }
+}
+
+
+/* ── Retained: things Tailwind can't express ── */
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1e1e30; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #242438; }
+
+/* ── CSS custom properties for common theme colors ── */
+:root {
+  --color-accent: #0070f3;
+  --color-accent-hover: #0060d3;
+  --color-border: #e5e7eb;
+  --color-text-primary: #111827;
+  --color-text-secondary: #4b5563;
+  --color-text-muted: #6b7280;
+  --color-text-disabled: #9ca3af;
+  --color-bg-hover: #f3f4f6;
+  --color-bg-subtle: #f9fafb;
+  --color-object-fill: #5366ff;
+}
+
+/* ── Range slider with gradient fill + visible thumb ── */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: linear-gradient(to right, var(--color-accent) 0%, var(--color-accent) var(--range-progress, 50%), var(--color-border) var(--range-progress, 50%), var(--color-border) 100%);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  cursor: pointer;
+}
+
+/* Canvas checker pattern *//* Canvas checker pattern */
+/* .canvas-checker { 
+  background-image:
+    linear-gradient(45deg, #1a1a2e 25%, transparent 25%),
+    linear-gradient(-45deg, #1a1a2e 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #1a1a2e 75%),
+    linear-gradient(-45deg, transparent 75%, #1a1a2e 75%);
+  background-size: 16px 16px; 
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+  background-color: #141420;
+} */
+.canvas-checker {
+  background-color: #edf5ff;
+
+  background-image:
+    linear-gradient(45deg, #dfeeff 25%, transparent 25%),
+    linear-gradient(-45deg, #dfeeff 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #dfeeff 75%),
+    linear-gradient(-45deg, transparent 75%, #dfeeff 75%);
+
+  background-size: 12px 12px;
+  background-position:
+    0 0,
+    0 6px,
+    6px -6px,
+    -6px 0;
+}
+
+/* Cursor grab for sliders */
+.adj-slider::-webkit-slider-thumb { 
+  cursor: grab;
+  box-shadow: 0 0 0 2px #17172a, 0 0 0 3px #7c5cfc;
+  transition: box-shadow 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.adj-slider::-webkit-slider-thumb:hover { 
+  box-shadow: 0 0 0 2px #17172a, 0 0 0 4px #9b7fff;
+}
+.adj-slider::-webkit-slider-thumb:active { cursor: grabbing; }
+.adj-slider::-moz-range-thumb:active { cursor: grabbing; }

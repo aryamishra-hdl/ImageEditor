@@ -13,6 +13,7 @@ import {
   Polygon,
   Group,
   Shadow,
+  Ellipse,
 } from "fabric";
 import { DEFAULT_OBJECT_STATE, DEFAULT_EFFECTS } from "../utils/imageHelpers";
 
@@ -80,6 +81,15 @@ export const useFabricEditor = () => {
         canvas._eraserCleanup();
         canvas._eraserCleanup = null;
       }
+
+      // 5. Cleanup magnetic lasso if switching away from it
+      if (
+        activeToolRef.current === "magneticLasso" &&
+        canvas._magneticCleanup
+      ) {
+        canvas._magneticCleanup();
+        canvas._magneticCleanup = null;
+      }
     }
 
     activeToolRef.current = tool;
@@ -93,8 +103,15 @@ export const useFabricEditor = () => {
       const canvasObjects = fabricRef.current
         .getObjects()
         .filter((o) => !o.id?.toString().startsWith("crop-rect"));
-      const json = fabricRef.current.toObject(["id", "name", "effectsData", "_skipHistoryOnAdd"]);
-      json.objects = canvasObjects.map((o) => o.toObject(["id", "name", "effectsData", "_skipHistoryOnAdd"]));
+      const json = fabricRef.current.toObject([
+        "id",
+        "name",
+        "effectsData",
+        "_skipHistoryOnAdd",
+      ]);
+      json.objects = canvasObjects.map((o) =>
+        o.toObject(["id", "name", "effectsData", "_skipHistoryOnAdd"]),
+      );
 
       if (historyIndexRef.current < historyRef.current.length - 1)
         historyRef.current = historyRef.current.slice(
@@ -144,7 +161,8 @@ export const useFabricEditor = () => {
   useEffect(() => {
     const onKey = (e) => {
       const tag = e.target?.tagName?.toLowerCase();
-      const isTyping = tag === "input" || tag === "textarea" || e.target?.isContentEditable;
+      const isTyping =
+        tag === "input" || tag === "textarea" || e.target?.isContentEditable;
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
         e.shiftKey ? redo() : undo();
@@ -167,14 +185,32 @@ export const useFabricEditor = () => {
         // Tool shortcuts — resolved via ref so no definition-order issue
         const s = toolShortcutsRef.current;
         switch (e.key.toLowerCase()) {
-          case "v": s.setSelectMode?.(); break;
-          case "h": s.setPanMode?.(); break;
-          case "b": s.setBrushMode?.(); break;
-          case "e": s.setEraserMode?.(); break;
-          case "l": s.startLassoMode?.(); break;
-          case "p": s.setPolygonMode?.(); break;
-          case "a": s.setArrowMode?.(); break;
-          default: break;
+          case "v":
+            s.setSelectMode?.();
+            break;
+          case "h":
+            s.setPanMode?.();
+            break;
+          case "b":
+            s.setBrushMode?.();
+            break;
+          case "e":
+            s.setEraserMode?.();
+            break;
+          case "l":
+            s.startLassoMode?.();
+            break;
+          case "m":
+            s.startMagneticLasso?.();
+            break;
+          case "p":
+            s.setPolygonMode?.();
+            break;
+          case "a":
+            s.setArrowMode?.();
+            break;
+          default:
+            break;
         }
       }
     };
@@ -337,7 +373,7 @@ export const useFabricEditor = () => {
           !isHistoryProcessingRef.current &&
           e.target?.type !== "activeSelection" &&
           e.target?.id !== "crop-rect" &&
-          !e.target?._skipHistoryOnAdd   // eraser/lasso commit their own history
+          !e.target?._skipHistoryOnAdd // eraser/lasso commit their own history
         )
           saveHistory();
       });
@@ -413,6 +449,8 @@ export const useFabricEditor = () => {
       canvas.on("mouse:down", (opt) => {
         const e = opt.e;
         const tool = activeToolRef.current;
+        // Skip for tools that have their own dedicated event handlers
+        if (tool === "eraser" || tool === "brush" || tool === "lasso" || tool === "magneticLasso" || tool === "crop") return;
         const pointer = canvas.getScenePoint(opt.e);
 
         if (tool === "pan") {
@@ -501,6 +539,8 @@ export const useFabricEditor = () => {
 
       canvas.on("mouse:move", (opt) => {
         const tool = activeToolRef.current;
+        // Skip for tools that have their own dedicated event handlers
+        if (tool === "eraser" || tool === "brush" || tool === "lasso" || tool === "magneticLasso" || tool === "crop") return;
         const pointer = canvas.getScenePoint(opt.e);
 
         if (tool === "pan") {
@@ -536,6 +576,8 @@ export const useFabricEditor = () => {
 
       canvas.on("mouse:up", () => {
         const tool = activeToolRef.current;
+        // Skip for tools that have their own dedicated event handlers
+        if (tool === "eraser" || tool === "brush" || tool === "lasso" || tool === "magneticLasso" || tool === "crop") return;
         if (tool === "pan") {
           isPanning = false;
           canvas.defaultCursor = "grab";
@@ -710,10 +752,12 @@ export const useFabricEditor = () => {
       canvas.isDrawingMode = false;
       canvas.selection = false;
       canvas.defaultCursor = "crosshair";
+      canvas.discardActiveObject();
       canvas.getObjects().forEach((o) => {
         o.selectable = false;
         o.evented = false;
       });
+      canvas.requestRenderAll();
       setActiveTool("eraser");
 
       // ── Overlay canvas for live stroke preview ─────────────────────────
@@ -721,28 +765,24 @@ export const useFabricEditor = () => {
       const overlay = document.createElement("canvas");
       overlay.width = canvas.width;
       overlay.height = canvas.height;
-      // Position relative to lowerEl's parent using getBoundingClientRect
-      const parent = lowerEl.parentElement;
-      const parentRect = parent.getBoundingClientRect();
-      const elRect = lowerEl.getBoundingClientRect();
       Object.assign(overlay.style, {
         position: "absolute",
-        top:  (elRect.top  - parentRect.top)  + parent.scrollTop  + "px",
-        left: (elRect.left - parentRect.left) + parent.scrollLeft + "px",
-        width:  lowerEl.style.width  || lowerEl.offsetWidth  + "px",
-        height: lowerEl.style.height || lowerEl.offsetHeight + "px",
+        inset: 0,
+        width: lowerEl.style.width || canvas.width + "px",
+        height: lowerEl.style.height || canvas.height + "px",
         pointerEvents: "none",
         zIndex: 10,
       });
+      const parent = lowerEl.parentElement;
       parent.appendChild(overlay);
       const overlayCtx = overlay.getContext("2d");
 
       // ── Per-stroke state ───────────────────────────────────────────────
       let isErasing = false;
-      let targetObj = null;      // The Fabric object being erased
-      let offscreen = null;      // Working pixel copy of the target object
+      let targetObj = null; // The Fabric object being erased
+      let offscreen = null; // Working pixel copy of the target object
       let offCtx = null;
-      let offBounds = null;      // { left, top, width, height } in canvas coords
+      let offBounds = null; // { left, top, width, height } in canvas coords
       let eraserSize = size;
       let lastPoint = null;
 
@@ -771,40 +811,30 @@ export const useFabricEditor = () => {
       // offscreen canvas at its natural bounding-box size.
       const initOffscreen = (obj) => {
         const bound = obj.getBoundingRect(true);
-        offBounds = { left: bound.left, top: bound.top, width: bound.width, height: bound.height };
+        offBounds = {
+          left: bound.left,
+          top: bound.top,
+          width: bound.width,
+          height: bound.height,
+        };
 
         // Use 2× for sharpness
         const scale = 2;
         offscreen = document.createElement("canvas");
-        offscreen.width  = Math.ceil(bound.width  * scale);
+        offscreen.width = Math.ceil(bound.width * scale);
         offscreen.height = Math.ceil(bound.height * scale);
         offCtx = offscreen.getContext("2d");
         offCtx.clearRect(0, 0, offscreen.width, offscreen.height);
 
-        if (obj.type === "image") {
-          // For real images draw the underlying <img>/<canvas> element directly
-          const el = obj.getElement();
-          offCtx.save();
-          offCtx.scale(scale, scale);
-          // We need the object rendered into the bounding-box coordinate space
-          offCtx.translate(-bound.left, -bound.top);
-          const vpt = canvas.viewportTransform || [1, 0, 0, 1, 0, 0];
-          offCtx.transform(...vpt);
-          const mat = obj.calcTransformMatrix();
-          offCtx.transform(...mat);
-          // drawImage at object-center origin (Fabric convention)
-          offCtx.drawImage(el, -obj.width / 2, -obj.height / 2, obj.width, obj.height);
-          offCtx.restore();
-        } else {
-          // For shapes / paths / text: rasterise via Fabric's own renderer
-          offCtx.save();
-          offCtx.scale(scale, scale);
-          offCtx.translate(-bound.left, -bound.top);
-          const vpt = canvas.viewportTransform || [1, 0, 0, 1, 0, 0];
-          offCtx.transform(...vpt);
-          obj.render(offCtx);
-          offCtx.restore();
-        }
+        // Render the object into the bounding-box coordinate space.
+        // obj.render() internally calls obj.transform(ctx) which applies
+        // calcTransformMatrix() — that already handles position, rotation, and scale.
+        // We only need to translate to bound origin and apply the 2x scale.
+        offCtx.save();
+        offCtx.scale(scale, scale);
+        offCtx.translate(-bound.left, -bound.top);
+        obj.render(offCtx);
+        offCtx.restore();
       };
 
       // Erase a circle at canvas-space point `pt` into the offscreen buffer
@@ -814,8 +844,8 @@ export const useFabricEditor = () => {
 
         // Map canvas coords → offscreen pixel coords
         const ox = (pt.x - offBounds.left) * scale;
-        const oy = (pt.y - offBounds.top)  * scale;
-        const r  = (eraserSize / 2) * scale;
+        const oy = (pt.y - offBounds.top) * scale;
+        const r = (eraserSize / 2) * scale;
 
         offCtx.save();
         offCtx.globalCompositeOperation = "destination-out";
@@ -828,11 +858,14 @@ export const useFabricEditor = () => {
 
       // Interpolated erase between two canvas-space points
       const eraseStroke = (from, to) => {
-        const dist  = Math.hypot(to.x - from.x, to.y - from.y);
+        const dist = Math.hypot(to.x - from.x, to.y - from.y);
         const steps = Math.max(1, Math.ceil(dist / (eraserSize / 4)));
         for (let i = 0; i <= steps; i++) {
           const t = i / steps;
-          erasePoint({ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t });
+          erasePoint({
+            x: from.x + (to.x - from.x) * t,
+            y: from.y + (to.y - from.y) * t,
+          });
         }
       };
 
@@ -861,7 +894,7 @@ export const useFabricEditor = () => {
               top: offBounds.top,
               scaleX: 1 / scale,
               scaleY: 1 / scale,
-              angle: 0,          // bounding-box image is already axis-aligned
+              angle: 0, // bounding-box image is already axis-aligned
               flipX: false,
               flipY: false,
               opacity: obj.opacity,
@@ -869,6 +902,8 @@ export const useFabricEditor = () => {
               cornerStyle: "circle",
               cornerColor: "#5366ff",
               transparentCorners: false,
+              selectable: false,
+              evented: false,
               id: obj.id,
               name: obj.name,
               originX: "left",
@@ -892,9 +927,6 @@ export const useFabricEditor = () => {
       // ── Mouse event handlers ───────────────────────────────────────────
       const onMouseDown = (opt) => {
         if (activeToolRef.current !== "eraser") return;
-        // Prevent Fabric from starting a drag/move on the object beneath
-        canvas.discardActiveObject();
-        canvas.requestRenderAll();
         opt.e.preventDefault?.();
         opt.e.stopPropagation?.();
         const ptr = canvas.getScenePoint(opt.e);
@@ -904,12 +936,6 @@ export const useFabricEditor = () => {
         initOffscreen(targetObj);
         lastPoint = ptr;
         erasePoint(ptr);
-        // Live preview for images only (shapes will commit on mouseup)
-        if (targetObj.type === "image") {
-          const el = targetObj.getElement();
-          if (el?.tagName === "IMG") el.src = offscreen.toDataURL("image/png");
-        }
-        canvas.requestRenderAll();
       };
 
       const onMouseMove = (opt) => {
@@ -918,24 +944,27 @@ export const useFabricEditor = () => {
         if (!isErasing || !targetObj || !offscreen) return;
         eraseStroke(lastPoint, ptr);
         lastPoint = ptr;
-        if (targetObj.type === "image") {
-          const el = targetObj.getElement();
-          if (el?.tagName === "IMG") el.src = offscreen.toDataURL("image/png");
-        }
-        canvas.requestRenderAll();
       };
 
       const onMouseUp = async () => {
         overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
         if (!isErasing || !targetObj) {
-          isErasing = false; targetObj = null; offscreen = null;
-          offCtx = null; offBounds = null; lastPoint = null;
+          isErasing = false;
+          targetObj = null;
+          offscreen = null;
+          offCtx = null;
+          offBounds = null;
+          lastPoint = null;
           return;
         }
         const obj = targetObj;
-        isErasing = false; targetObj = null; lastPoint = null;
+        isErasing = false;
+        targetObj = null;
+        lastPoint = null;
         await commitErase(obj);
-        offscreen = null; offCtx = null; offBounds = null;
+        offscreen = null;
+        offCtx = null;
+        offBounds = null;
       };
 
       const onMouseOut = () => {
@@ -956,6 +985,12 @@ export const useFabricEditor = () => {
         canvas.off("mouse:up", onMouseUp);
         canvas.off("mouse:out", onMouseOut);
         overlay.remove();
+        // Restore objects to interactive state
+        canvas.getObjects().forEach((o) => {
+          o.selectable = true;
+          o.evented = true;
+        });
+        canvas.requestRenderAll();
       };
     },
     [setActiveTool, addCustomControls, saveHistory],
@@ -1207,13 +1242,79 @@ export const useFabricEditor = () => {
             },
           );
           break;
+        case "ellipse":
+          shape = new Ellipse({ ...common, rx: 60, ry: 40 });
+          break;
+        case "rounded-rect":
+          shape = new Rect({ ...common, width: 120, height: 120, rx: 24, ry: 24 });
+          break;
+        case "right-triangle":
+          shape = new Polygon([
+            {x: -60, y: 55},
+            {x: 60, y: 55},
+            {x: -60, y: -55},
+          ], { ...common });
+          break;
+        case "diamond":
+          shape = new Polygon([
+            {x: 0, y: -70},
+            {x: 55, y: 0},
+            {x: 0, y: 70},
+            {x: -55, y: 0},
+          ], { ...common });
+          break;
+        case "pentagon":
+          shape = new Polygon([
+            {x: 0, y: -70},
+            {x: 67, y: -22},
+            {x: 41, y: 57},
+            {x: -41, y: 57},
+            {x: -67, y: -22},
+          ], { ...common });
+          break;
+        case "hexagon":
+          shape = new Polygon([
+            {x: 70, y: 0},
+            {x: 35, y: 61},
+            {x: -35, y: 61},
+            {x: -70, y: 0},
+            {x: -35, y: -61},
+            {x: 35, y: -61},
+          ], { ...common });
+          break;
+        case "octagon":
+          shape = new Polygon([
+            {x: 65, y: 27},
+            {x: 27, y: 65},
+            {x: -27, y: 65},
+            {x: -65, y: 27},
+            {x: -65, y: -27},
+            {x: -27, y: -65},
+            {x: 27, y: -65},
+            {x: 65, y: -27},
+          ], { ...common });
+          break;
+        case "star":
+          shape = new Polygon([
+            {x: 0, y: -70},
+            {x: 16, y: -22},
+            {x: 67, y: -22},
+            {x: 26, y: 8},
+            {x: 41, y: 57},
+            {x: 0, y: 27},
+            {x: -41, y: 57},
+            {x: -26, y: 8},
+            {x: -67, y: -22},
+            {x: -16, y: -22},
+          ], { ...common });
+          break;
         default:
           shape = new Rect({
             ...common,
             width: 120,
             height: 120,
-            rx: 12,
-            ry: 12,
+            rx: 0,
+            ry: 0,
           });
           break;
       }
@@ -1434,11 +1535,16 @@ export const useFabricEditor = () => {
       ctx.save();
       ctx.scale(multiplier, multiplier);
       ctx.translate(-br.left, -br.top);
-      
+
       const origFill = path.fill;
       const origStroke = path.stroke;
       const origVisible = path.visible;
-      path.set({ fill: "black", stroke: "black", strokeWidth: 1, visible: true });
+      path.set({
+        fill: "black",
+        stroke: "black",
+        strokeWidth: 1,
+        visible: true,
+      });
       path.render(ctx);
       path.set({ fill: origFill, stroke: origStroke, visible: origVisible });
       ctx.restore();
@@ -1501,6 +1607,391 @@ export const useFabricEditor = () => {
     canvas.on("path:created", onPathCreated);
   }, [setActiveTool, addCustomControls, saveHistory]);
 
+  // ─── Background Removal ───────────────────────────────────────────────────
+  const removeBackground = useCallback(async (quality = "medium") => {
+  if (!selectedObject || selectedObject.type !== "image") return;
+
+  try {
+    const { removeBackgroundFromFabricImage } =
+      await import("../utils/removeBackground");
+
+    const newObjectUrl = await removeBackgroundFromFabricImage(selectedObject, quality);
+
+    FabricImage.fromURL(newObjectUrl, { crossOrigin: "anonymous" }).then((newImg) => {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+
+      // Preserve all transforms from the original object
+      newImg.set({
+        left:    selectedObject.left,
+        top:     selectedObject.top,
+        scaleX:  selectedObject.scaleX,
+        scaleY:  selectedObject.scaleY,
+        angle:   selectedObject.angle,
+        opacity: selectedObject.opacity,
+        flipX:   selectedObject.flipX,
+        flipY:   selectedObject.flipY,
+      });
+
+      canvas.remove(selectedObject);
+      canvas.add(newImg);
+      canvas.setActiveObject(newImg);
+      canvas.requestRenderAll();
+      saveHistory();
+    });
+  } catch (err) {
+    console.error("removeBackground failed:", err);
+    alert(`Background removal failed: ${err.message}`);
+  }
+}, [selectedObject, fabricRef, saveHistory]);
+
+  // ─── Magnetic Lasso ───────────────────────────────────────────────────────
+  const startMagneticLasso = useCallback(() => {
+    if (!fabricRef.current) return;
+    const canvas = fabricRef.current;
+
+    // Clean up any previous magnetic lasso session
+    if (canvas._magneticCleanup) {
+      canvas._magneticCleanup();
+      canvas._magneticCleanup = null;
+    }
+
+    canvas.isDrawingMode = false;
+    canvas.selection = false;
+    canvas.defaultCursor = "crosshair";
+    canvas.getObjects().forEach((o) => {
+      o.selectable = false;
+      o.evented = false;
+    });
+    setActiveTool("magneticLasso");
+    setIsCropping(true);
+
+    // ── Overlay canvas for live path preview ────────────────────────────────
+    const lowerEl = canvas.lowerCanvasEl ?? canvas.getElement();
+    const parent = lowerEl.parentElement;
+    const parentRect = parent.getBoundingClientRect();
+    const elRect = lowerEl.getBoundingClientRect();
+
+    const overlay = document.createElement("canvas");
+    overlay.width = canvas.width;
+    overlay.height = canvas.height;
+    Object.assign(overlay.style, {
+      position: "absolute",
+      top: elRect.top - parentRect.top + parent.scrollTop + "px",
+      left: elRect.left - parentRect.left + parent.scrollLeft + "px",
+      width: lowerEl.style.width || lowerEl.offsetWidth + "px",
+      height: lowerEl.style.height || lowerEl.offsetHeight + "px",
+      pointerEvents: "none",
+      zIndex: 20,
+    });
+    parent.appendChild(overlay);
+    const octx = overlay.getContext("2d");
+
+    // ── Downscale canvas for edge detection (keeps worker fast) ─────────────
+    const SCALE = 0.4; // work at 40% resolution
+    const dw = Math.round(canvas.width * SCALE);
+    const dh = Math.round(canvas.height * SCALE);
+    const small = document.createElement("canvas");
+    small.width = dw;
+    small.height = dh;
+    const sctx = small.getContext("2d");
+
+    // Render entire canvas into the small offscreen
+    const fullDataUrl = canvas.toDataURL({ format: "png", multiplier: SCALE });
+    const seedImg = new Image();
+    seedImg.src = fullDataUrl;
+
+    let workerReady = false;
+    let anchors = []; // locked anchor points [{x,y}] in canvas coords
+    let livePath = []; // current snapped path from last anchor to cursor
+    let allSegments = []; // completed segments [[{x,y},...],...]
+    let cursorPos = null;
+
+    // Vite resolves new URL('...', import.meta.url) with ?worker hint statically.
+    // This works in both dev and production builds.
+    let worker;
+    try {
+      const workerUrl = new URL(
+        "../workers/MagneticLassoWorker.js",
+        import.meta.url,
+      );
+      worker = new Worker(workerUrl, { type: "module" });
+    } catch (err) {
+      console.error("Failed to spawn MagneticLassoWorker:", err);
+      setIsCropping(false);
+      setActiveTool("select");
+      return;
+    }
+
+    worker.onmessage = (e) => {
+      if (e.data.type === "EDGES_READY") {
+        workerReady = true;
+      }
+      if (e.data.type === "PATH_RESULT") {
+        // Scale path coords back from worker space → canvas space
+        livePath = e.data.path.map((p) => ({
+          x: p.x / SCALE,
+          y: p.y / SCALE,
+        }));
+        drawOverlay();
+      }
+    };
+
+    seedImg.onload = () => {
+      sctx.drawImage(seedImg, 0, 0, dw, dh);
+      const imgData = sctx.getImageData(0, 0, dw, dh);
+      worker.postMessage({
+        type: "COMPUTE_EDGES",
+        imageData: imgData,
+        width: dw,
+        height: dh,
+      });
+    };
+
+    // ── Draw the overlay ─────────────────────────────────────────────────────
+    const drawOverlay = () => {
+      octx.clearRect(0, 0, overlay.width, overlay.height);
+
+      // Collect all points: completed segments + live path
+      const allPts = [...allSegments.flat(), ...livePath];
+      if (allPts.length < 2) {
+        // Just draw anchor dot
+        if (anchors.length > 0) {
+          drawAnchor(anchors[0]);
+        }
+        return;
+      }
+
+      // Dashed green path
+      octx.save();
+      octx.strokeStyle = "rgba(34,197,94,0.9)";
+      octx.lineWidth = 1.5;
+      octx.setLineDash([5, 3]);
+      octx.beginPath();
+      octx.moveTo(allPts[0].x, allPts[0].y);
+      allPts.slice(1).forEach((p) => octx.lineTo(p.x, p.y));
+      octx.stroke();
+      octx.restore();
+
+      // Closing line if near start
+      if (anchors.length > 1 && cursorPos) {
+        const start = anchors[0];
+        const dist = Math.hypot(cursorPos.x - start.x, cursorPos.y - start.y);
+        if (dist < 20) {
+          octx.save();
+          octx.strokeStyle = "rgba(34,197,94,0.5)";
+          octx.lineWidth = 1;
+          octx.setLineDash([3, 3]);
+          octx.beginPath();
+          octx.moveTo(allPts[allPts.length - 1].x, allPts[allPts.length - 1].y);
+          octx.lineTo(start.x, start.y);
+          octx.stroke();
+          octx.restore();
+        }
+      }
+
+      // Anchor dots
+      anchors.forEach(drawAnchor);
+    };
+
+    const drawAnchor = (pt) => {
+      octx.save();
+      octx.beginPath();
+      octx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+      octx.fillStyle = "#22c55e";
+      octx.strokeStyle = "#fff";
+      octx.lineWidth = 1.5;
+      octx.fill();
+      octx.stroke();
+      octx.restore();
+    };
+
+    // ── Request path from worker ─────────────────────────────────────────────
+    let pathRequestTimer = null;
+    const requestPath = (toX, toY) => {
+      if (!workerReady || anchors.length === 0) return;
+      clearTimeout(pathRequestTimer);
+      pathRequestTimer = setTimeout(() => {
+        const last = anchors[anchors.length - 1];
+        worker.postMessage({
+          type: "FIND_PATH",
+          fromX: last.x * SCALE,
+          fromY: last.y * SCALE,
+          toX: toX * SCALE,
+          toY: toY * SCALE,
+        });
+      }, 16); // ~60fps throttle
+    };
+
+    // ── Extract and add the lasso region ────────────────────────────────────
+    const extractRegion = () => {
+      const allPts = [...allSegments.flat(), ...livePath];
+      if (allPts.length < 5) return;
+
+      // Use an offscreen canvas — same approach as regular lasso
+      const minX = Math.min(...allPts.map((p) => p.x));
+      const minY = Math.min(...allPts.map((p) => p.y));
+      const maxX = Math.max(...allPts.map((p) => p.x));
+      const maxY = Math.max(...allPts.map((p) => p.y));
+      const rw = maxX - minX;
+      const rh = maxY - minY;
+      if (rw < 2 || rh < 2) return;
+
+      const MULT = 2;
+      const off = document.createElement("canvas");
+      off.width = rw * MULT;
+      off.height = rh * MULT;
+      const ctx = off.getContext("2d");
+
+      // Draw filled polygon as mask
+      ctx.save();
+      ctx.scale(MULT, MULT);
+      ctx.translate(-minX, -minY);
+      ctx.beginPath();
+      ctx.moveTo(allPts[0].x, allPts[0].y);
+      allPts.slice(1).forEach((p) => ctx.lineTo(p.x, p.y));
+      ctx.closePath();
+      ctx.fillStyle = "black";
+      ctx.fill();
+      ctx.restore();
+
+      // Capture the canvas region
+      const regionUrl = canvas.toDataURL({
+        left: minX,
+        top: minY,
+        width: rw,
+        height: rh,
+        multiplier: MULT,
+        format: "png",
+      });
+
+      const img = new Image();
+      img.onload = () => {
+        ctx.globalCompositeOperation = "source-in";
+        ctx.drawImage(img, 0, 0, off.width, off.height);
+
+        FabricImage.fromURL(off.toDataURL("image/png")).then((fabImg) => {
+          fabImg.set({
+            left: minX,
+            top: minY,
+            scaleX: 1 / MULT,
+            scaleY: 1 / MULT,
+            cornerStyle: "circle",
+            cornerColor: "#5366ff",
+            transparentCorners: false,
+            id: `magnetic-${Date.now()}`,
+            name: "Magnetic Lasso",
+            originX: "left",
+            originY: "top",
+            _skipHistoryOnAdd: true,
+          });
+          addCustomControls(fabImg);
+          canvas.add(fabImg);
+          canvas.setActiveObject(fabImg);
+          canvas.requestRenderAll();
+          saveHistory();
+        });
+      };
+      img.src = regionUrl;
+    };
+
+    // ── Mouse events ─────────────────────────────────────────────────────────
+    const onMouseMove = (opt) => {
+      const ptr = canvas.getScenePoint(opt.e);
+      cursorPos = { x: ptr.x, y: ptr.y };
+
+      // Check if near first anchor to show close hint
+      if (anchors.length > 1) {
+        const dist = Math.hypot(ptr.x - anchors[0].x, ptr.y - anchors[0].y);
+        overlay.style.cursor = dist < 20 ? "cell" : "crosshair";
+      }
+
+      requestPath(ptr.x, ptr.y);
+      if (!workerReady && anchors.length === 0) drawOverlay();
+    };
+
+    const onMouseDown = (opt) => {
+      if (activeToolRef.current !== "magneticLasso") return;
+      opt.e.preventDefault();
+      const ptr = canvas.getScenePoint(opt.e);
+
+      // Close path if clicking near first anchor
+      if (anchors.length > 1) {
+        const dist = Math.hypot(ptr.x - anchors[0].x, ptr.y - anchors[0].y);
+        if (dist < 20) {
+          // Commit the live segment then extract
+          if (livePath.length > 0) allSegments.push([...livePath]);
+          extractRegion();
+          cleanup();
+          return;
+        }
+      }
+
+      // Lock current live path as a completed segment and add new anchor
+      if (livePath.length > 0) allSegments.push([...livePath]);
+      anchors.push({ x: ptr.x, y: ptr.y });
+      livePath = [];
+      drawOverlay();
+    };
+
+    const onDblClick = () => {
+      if (anchors.length > 1) {
+        if (livePath.length > 0) allSegments.push([...livePath]);
+        extractRegion();
+      }
+      cleanup();
+    };
+
+    const onKeyDown = (e) => {
+      if (e.key === "Enter") {
+        if (anchors.length > 1) {
+          if (livePath.length > 0) allSegments.push([...livePath]);
+          extractRegion();
+        }
+        cleanup();
+      }
+      if (e.key === "Escape") cleanup();
+    };
+
+    // ── Cleanup ──────────────────────────────────────────────────────────────
+    const cleanup = () => {
+      // Null out FIRST so setActiveTool's guard doesn't re-enter cleanup
+      canvas._magneticCleanup = null;
+
+      clearTimeout(pathRequestTimer);
+      worker.terminate();
+      overlay.remove();
+      canvas.off("mouse:move", onMouseMove);
+      canvas.off("mouse:down", onMouseDown);
+      window.removeEventListener("keydown", onKeyDown);
+      lowerEl.removeEventListener("dblclick", onDblClick);
+      canvas.isDrawingMode = false;
+      canvas.selection = true;
+      canvas.defaultCursor = "default";
+      canvas.getObjects().forEach((o) => {
+        o.selectable = true;
+        o.evented = true;
+      });
+      setIsCropping(false);
+      // Use _setActiveTool directly — avoids re-entering the cleanup guard in setActiveTool
+      activeToolRef.current = "select";
+      _setActiveTool("select");
+    };
+
+    canvas._magneticCleanup = cleanup;
+
+    canvas.on("mouse:move", onMouseMove);
+    canvas.on("mouse:down", onMouseDown);
+    window.addEventListener("keydown", onKeyDown);
+    lowerEl.addEventListener("dblclick", onDblClick);
+  }, [
+    setActiveTool,
+    setIsCropping,
+    addCustomControls,
+    saveHistory,
+    activeToolRef,
+  ]);
+
   const setPolygonMode = useCallback(() => {
     if (!fabricRef.current) return;
     fabricRef.current.isDrawingMode = false;
@@ -1533,10 +2024,20 @@ export const useFabricEditor = () => {
       setBrushMode,
       setEraserMode,
       startLassoMode,
+      startMagneticLasso,
       setPolygonMode,
       setArrowMode,
     };
-  }, [setSelectMode, setPanMode, setBrushMode, setEraserMode, startLassoMode, setPolygonMode, setArrowMode]);
+  }, [
+    setSelectMode,
+    setPanMode,
+    setBrushMode,
+    setEraserMode,
+    startLassoMode,
+    startMagneticLasso,
+    setPolygonMode,
+    setArrowMode,
+  ]);
 
   return {
     fabricRef,
@@ -1573,6 +2074,8 @@ export const useFabricEditor = () => {
     exportCanvas,
     resizeCanvas,
     startLassoMode,
+    startMagneticLasso,
+    removeBackground,
     setPolygonMode,
     setArrowMode,
   };
